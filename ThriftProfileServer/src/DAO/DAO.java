@@ -16,7 +16,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;   
 import java.util.ArrayList;
+import java.util.Hashtable;
 import java.util.List;
+import java.util.Map;
 import thriftprofile.Profile;
 /**
  *
@@ -26,6 +28,7 @@ public class DAO {
     
     private Driver driver;
     private Connection connection;
+    protected Hashtable<Integer, Profile> hash_table = new Hashtable<>();
     
     public DAO() {
         try{
@@ -38,26 +41,52 @@ public class DAO {
     }
     
     public Profile getProfileById(int id){
+        
         Profile profile = new Profile();
-        try{
-            PreparedStatement statement = connection.prepareStatement(Constants.GET_ONE);
-            statement.setInt(1, id);
-            ResultSet rs = statement.executeQuery();
-            
-            while(rs.next()){
-                profile = new Profile();
-                profile.setId(rs.getInt("PfID"));
-                profile.setName(rs.getString("Name"));
-                profile.setEmail(rs.getString("Email"));
-                profile.setAddress(rs.getString("Address"));
-                profile.setPhone(rs.getInt("Phone"));
-            }
-            
-            statement.execute();
-            statement.close();
-        }catch(SQLException e){
-            e.printStackTrace();
+        System.out.println("hash: " + hash_table.size());
+        boolean flag = false;
+        
+        if(hash_table.size()>0){
+            for (Map.Entry<Integer, Profile> entry : hash_table.entrySet()){
+                if(entry.getKey() == id){
+                    profile = entry.getValue();
+                    flag = true;
+                    break;
+                }else{
+                    flag = false;
+                }
+            } 
         }
+        
+        if(flag == false){
+            try{
+                PreparedStatement statement = connection.prepareStatement(Constants.GET_ONE);
+                statement.setInt(1, id);
+                ResultSet rs = statement.executeQuery();
+
+                while(rs.next()){
+                    profile = new Profile();
+                    profile.setId(rs.getInt("PfID"));
+                    profile.setName(rs.getString("Name"));
+                    profile.setEmail(rs.getString("Email"));
+                    profile.setAddress(rs.getString("Address"));
+                    profile.setPhone(rs.getInt("Phone"));
+                }
+
+                if(profile.getId() != 0 ){
+                    hash_table.put(profile.getId(), profile);
+                }
+
+                statement.execute();
+                statement.close();
+                
+                System.out.println("Get from DB");
+                
+            }catch(SQLException e){
+                e.printStackTrace();
+            }
+        }
+        
         return profile;
     }
     
@@ -120,6 +149,15 @@ public class DAO {
             statement.setInt(1, id);
             statement.execute();
             statement.close();
+            
+            if(hash_table.size()>0){
+                for (Map.Entry<Integer, Profile> entry : hash_table.entrySet()){
+                    if(entry.getKey() == id){
+                        hash_table.remove(id);
+                        break;
+                    }
+                }
+            }
             
             System.out.println("Xóa profile thành công!");
         }catch (SQLException e){
