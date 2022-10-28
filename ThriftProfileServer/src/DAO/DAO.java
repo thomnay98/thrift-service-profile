@@ -8,9 +8,10 @@ package DAO;
 import static DAO.Constants.URL;
 import static DAO.Constants.USERNAME;
 import static DAO.Constants.PASSWORD;
+import java.io.IOException;
+import java.net.InetSocketAddress;
 
 import java.sql.Connection;
-import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -19,16 +20,19 @@ import java.util.ArrayList;
 import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Future;
+import net.spy.memcached.MemcachedClient;
 import thriftprofile.Profile;
 /**
  *
  * @author thom
  */
-public class DAO {
-    
-    private Driver driver;
+public class DAO { 
+
     private Connection connection;
     protected Hashtable<Integer, Profile> hash_table = new Hashtable<>();
+    protected MemcachedClient mcc = null;
+    
     
     public DAO() {
         try{
@@ -40,52 +44,95 @@ public class DAO {
         }
     }
     
+    private void printSqlException(SQLException exception) {
+        System.err.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+        System.err.println("SQL exception!");
+        System.err.println("SQL state: " + exception.getSQLState() + "; Error code: " + exception.getErrorCode());
+        System.err.println("Message: " + exception.getMessage());
+        System.err.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~");
+    }
+
+    
     public Profile getProfileById(int id){
         
         Profile profile = new Profile();
-        System.out.println("hash: " + hash_table.size());
-        boolean flag = false;
         
-        if(hash_table.size()>0){
-            for (Map.Entry<Integer, Profile> entry : hash_table.entrySet()){
-                if(entry.getKey() == id){
-                    profile = entry.getValue();
-                    flag = true;
-                    break;
-                }else{
-                    flag = false;
-                }
-            } 
-        }
+        // caching with memcached
         
-        if(flag == false){
-            try{
-                PreparedStatement statement = connection.prepareStatement(Constants.GET_ONE);
-                statement.setInt(1, id);
-                ResultSet rs = statement.executeQuery();
-
-                while(rs.next()){
-                    profile = new Profile();
-                    profile.setId(rs.getInt("PfID"));
-                    profile.setName(rs.getString("Name"));
-                    profile.setEmail(rs.getString("Email"));
-                    profile.setAddress(rs.getString("Address"));
-                    profile.setPhone(rs.getInt("Phone"));
-                }
-
-                if(profile.getId() != 0 ){
-                    hash_table.put(profile.getId(), profile);
-                }
-
-                statement.execute();
-                statement.close();
+        try{
+            mcc = new MemcachedClient(new InetSocketAddress("127.0.0.1",11211));
+            
+            if(mcc.get(String.valueOf(id))!= null){
                 
-                System.out.println("Get from DB");
+                profile = (Profile) mcc.get(String.valueOf(id));
+                System.out.println("Get from Memcached");
                 
-            }catch(SQLException e){
-                e.printStackTrace();
+            }else{
+                try{
+                    PreparedStatement statement = connection.prepareStatement(Constants.GET_ONE);
+                    statement.setInt(1, id);
+                    ResultSet rs = statement.executeQuery();
+
+                    while(rs.next()){
+                        profile = new Profile();
+                        profile.setId(rs.getInt("PfID"));
+                        profile.setName(rs.getString("Name"));
+                        profile.setEmail(rs.getString("Email"));
+                        profile.setAddress(rs.getString("Address"));
+                        profile.setPhone(rs.getInt("Phone"));
+                    }
+                    
+                    System.out.println("Database: " + profile);
+
+                    if(profile.getId() != 0 ){
+                        mcc.set(String.valueOf(profile.getId()), 2000, profile);
+                    }
+
+                    statement.execute();
+                    statement.close();
+
+                    System.out.println("Get from DB");
+
+                }catch(SQLException e){
+                    printSqlException(e);
+                }
             }
+        }catch (IOException ix){
+            ix.printStackTrace();
         }
+        
+        //caching with hash_table
+        
+//        if(hash_table.get(id) != null){
+//            profile = hash_table.get(id);
+//        } else {
+//            try{
+//                PreparedStatement statement = connection.prepareStatement(Constants.GET_ONE);
+//                statement.setInt(1, id);
+//                ResultSet rs = statement.executeQuery();
+//
+//                while(rs.next()){
+//                    profile = new Profile();
+//                    profile.setId(rs.getInt("PfID"));
+//                    profile.setName(rs.getString("Name"));
+//                    profile.setEmail(rs.getString("Email"));
+//                    profile.setAddress(rs.getString("Address"));
+//                    profile.setPhone(rs.getInt("Phone"));
+//                }
+//
+//                if(profile.getId() != 0 ){
+//                    hash_table.put(profile.getId(), profile);
+//                }
+//
+//                statement.execute();
+//                statement.close();
+//                
+//                System.out.println("Get from DB");
+//                
+//            }catch(SQLException e){
+//                printSqlException(e);
+//            }
+//        }
         
         return profile;
     }
@@ -101,15 +148,12 @@ public class DAO {
 
             int parameterIndex = 1;
             
-//            for (Iterator < Integer > iterator = ids.iterator(); iterator.hasNext();) {
-//                Integer id = iterator.next();
-//                statement.setInt(parameterIndex++, id);
-//            }
             for (Integer id : ids) {
                 statement.setInt(parameterIndex++, id);
             }
             
             rs = statement.executeQuery();
+                
             while(rs.next()){
                 Profile profile = new Profile();
                 profile.setId(rs.getInt("PfID"));
@@ -117,12 +161,13 @@ public class DAO {
                 profile.setEmail(rs.getString("Email"));
                 profile.setAddress(rs.getString("Address"));
                 profile.setPhone(rs.getInt("Phone"));
-                
+
                 profiles.add(profile);
             }
             
         }catch (SQLException e){
             e.printStackTrace();
+            printSqlException(e);
         }
         return profiles;
     }
@@ -140,6 +185,7 @@ public class DAO {
             System.out.println("Thêm profile thành công!");
         }catch(SQLException e){
             e.printStackTrace();
+            printSqlException(e);
         }
     }
     
@@ -150,18 +196,18 @@ public class DAO {
             statement.execute();
             statement.close();
             
-            if(hash_table.size()>0){
-                for (Map.Entry<Integer, Profile> entry : hash_table.entrySet()){
-                    if(entry.getKey() == id){
-                        hash_table.remove(id);
-                        break;
-                    }
-                }
+            if(hash_table.get(id) != null){
+                hash_table.remove(id);
+            }
+            
+            if(mcc.get(String.valueOf(id))!= null){
+                mcc.delete(String.valueOf(id));
             }
             
             System.out.println("Xóa profile thành công!");
         }catch (SQLException e){
             e.printStackTrace();
+            printSqlException(e);
         }   
     }
     

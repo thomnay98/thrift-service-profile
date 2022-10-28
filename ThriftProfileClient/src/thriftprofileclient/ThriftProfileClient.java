@@ -74,13 +74,18 @@ public class ThriftProfileClient {
         
         profiles = client.getMultiProfiles(listIds);
         
-        System.out.println("DS profile can tim: ");
+        
         if(profiles.size() >= 1){
+            if(profiles.size() < SL){
+                System.out.println("Chi tim thay "+ profiles.size()+" profile: ");
+            }else{
+                System.out.println("DS profile can tim: ");
+            }
             for (int i = 0; i< profiles.size(); i++){
                 System.out.println(profiles.get(i));
             }
         }else{
-            System.out.println(profiles);
+            System.out.println("Không tìm thấy profile nao");
         }
         
     }
